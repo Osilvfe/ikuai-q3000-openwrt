@@ -1,160 +1,115 @@
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-#
-# File: .github/workflows/openwrt-bulder.yml
-# Description: Build OpenWrt using GitHub Actions
-#
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-
-name: OpenWrt Builder
+name: Build iKuai Q3000 OpenWrt
 
 on:
-  repository_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/openwrt-builder.yml'
+      - 'config.seed'
+      - 'dts/**'
+      - 'scripts/**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
-  REPO_URL: https://github.com/coolsnowwolf/lede
-  REPO_BRANCH: master
-  FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: .config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: false
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
+  OPENWRT_REPO: https://github.com/openwrt/openwrt.git
+  OPENWRT_REF: openwrt-25.12
   TZ: Asia/Shanghai
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 360
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@main
+      - name: Checkout build repository
+        uses: actions/checkout@v4
 
-    - name: Initialization environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune --all --force || true
+          df -h
 
-    - name: Clone source code
-      working-directory: /workdir
-      run: |
-        df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses-dev libssl-dev python3 python3-pyelftools \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget curl \
+            libelf-dev device-tree-compiler qemu-utils zstd ccache
+          sudo apt-get clean
 
-    - name: Load custom feeds
-      run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+      - name: Clone latest OpenWrt 25.12 stable branch
+        run: |
+          git clone --depth 1 --branch "$OPENWRT_REF" "$OPENWRT_REPO" openwrt
+          cd openwrt
+          echo "OPENWRT_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git log -1 --oneline
 
-    - name: Update feeds
-      run: cd openwrt && ./scripts/feeds update -a
+      - name: Apply iKuai Q3000 support
+        run: |
+          chmod +x scripts/prepare-q3000.sh
+          ./scripts/prepare-q3000.sh "$GITHUB_WORKSPACE/openwrt"
+          grep -n "define Device/ikuai_q3000" openwrt/target/linux/mediatek/image/filogic.mk
+          grep -n "ikuai,q3000" openwrt/target/linux/mediatek/filogic/base-files/etc/board.d/02_network
 
-    - name: Install feeds
-      run: cd openwrt && ./scripts/feeds install -a
+      - name: Update and install feeds
+        working-directory: openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
-    - name: Load custom configuration
-      run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+      - name: Configure Q3000 target
+        working-directory: openwrt
+        run: |
+          cp "$GITHUB_WORKSPACE/config.seed" .config
+          make defconfig
+          grep -E '^CONFIG_TARGET_mediatek|^CONFIG_TARGET_ROOTFS_(SQUASHFS|INITRAMFS)|^CONFIG_PACKAGE_luci=' .config
 
-    - name: Download package
-      id: package
-      run: |
-        cd openwrt
-        make defconfig
-        make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
+      - name: Download sources
+        working-directory: openwrt
+        run: |
+          make download -j"$(nproc)" || make download -j1 V=s
+          find dl -type f -size -1024c -print -delete
 
-    - name: Compile the firmware
-      id: compile
-      run: |
-        cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
-        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+      - name: Compile firmware
+        working-directory: openwrt
+        run: |
+          make -j"$(nproc)" || make -j1 V=s
 
-    - name: Check space usage
-      if: (!cancelled())
-      run: df -hT
+      - name: Collect Q3000 images
+        run: |
+          set -euo pipefail
+          mkdir -p firmware
+          shopt -s nullglob
+          images=(openwrt/bin/targets/mediatek/filogic/*ikuai_q3000*)
+          if (( ${#images[@]} == 0 )); then
+            echo "No Q3000 firmware images were generated" >&2
+            find openwrt/bin/targets/mediatek/filogic -maxdepth 1 -type f -printf '%f\n' || true
+            exit 1
+          fi
+          cp -v "${images[@]}" firmware/
+          cp -v openwrt/bin/targets/mediatek/filogic/sha256sums firmware/ 2>/dev/null || true
+          {
+            echo "OpenWrt source: $OPENWRT_REPO"
+            echo "OpenWrt ref: $OPENWRT_REF"
+            echo "OpenWrt commit: $OPENWRT_COMMIT"
+            echo "Build time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > firmware/BUILD_INFO.txt
+          ls -lh firmware
 
-    - name: Upload bin directory
-      uses: actions/upload-artifact@main
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
-      with:
-        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: openwrt/bin
-
-    - name: Organize files
-      id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-      run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Upload firmware directory
-      uses: actions/upload-artifact@main
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      with:
-        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
-
-    - name: Generate release tag
-      id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
-        [ ${UPLOAD_GOFILE} = true && ${{ steps.gofile.outputs.url }} ] && echo "🔗 [GoFile](${{ steps.gofile.outputs.url }})" >> release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Upload firmware to release
-      uses: softprops/action-gh-release@master
-      if: steps.tag.outputs.status == 'success' && !cancelled()
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
-        files: ${{ env.FIRMWARE }}/*
-
-    - name: Delete workflow runs
-      uses: Mattraks/delete-workflow-runs@main
-      with:
-        retain_days: 0
-        keep_minimum_runs: 2
-
-    - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@master
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      with:
-        keep_latest: 3
-        delete_tags: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ikuai-q3000-openwrt-${{ github.run_number }}
+          path: firmware/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
