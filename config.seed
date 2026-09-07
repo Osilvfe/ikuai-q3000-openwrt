@@ -1,3 +1,4 @@
+# iKuai Q3000 stock-layout OpenWrt 25.12 build
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
 CONFIG_TARGET_mediatek_filogic_DEVICE_ikuai_q3000=y
