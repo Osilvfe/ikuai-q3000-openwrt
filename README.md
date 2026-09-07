@@ -1,39 +1,42 @@
-**English** | [中文](https://p3terx.com/archives/build-openwrt-with-github-actions.html)
+# iKuai Q3000 OpenWrt
 
-# Actions-OpenWrt
+GitHub Actions build for the iKuai IK-Q3000, ported to the current OpenWrt 25.12 stable branch.
 
-[![LICENSE](https://img.shields.io/github/license/mashape/apistatus.svg?style=flat-square&label=LICENSE)](https://github.com/P3TERX/Actions-OpenWrt/blob/master/LICENSE)
-![GitHub Stars](https://img.shields.io/github/stars/P3TERX/Actions-OpenWrt.svg?style=flat-square&label=Stars&logo=github)
-![GitHub Forks](https://img.shields.io/github/forks/P3TERX/Actions-OpenWrt.svg?style=flat-square&label=Forks&logo=github)
+## Build source
 
-A template for building OpenWrt with GitHub Actions
+- Upstream: `https://github.com/openwrt/openwrt`
+- Ref: `openwrt-25.12`
+- Target: `mediatek/filogic`
+- Device profile: `ikuai_q3000`
 
-## Usage
+The workflow follows the stock iKuai flash layout and generates the Q3000 initramfs, factory and sysupgrade images.
 
-- Click the [Use this template](https://github.com/P3TERX/Actions-OpenWrt/generate) button to create a new repository.
-- Generate `.config` files using [Lean's OpenWrt](https://github.com/coolsnowwolf/lede) source code. ( You can change it through environment variables in the workflow file. )
-- Push `.config` file to the GitHub repository.
-- Select `Build OpenWrt` on the Actions page.
-- Click the `Run workflow` button.
-- When the build is complete, click the `Artifacts` button in the upper right corner of the Actions page to download the binaries.
+## Stock-layout image profile
 
-## Tips
+| Partition | Offset | Size |
+| --- | ---: | ---: |
+| bl2 | `0x000000` | `0x100000` |
+| u-boot-env | `0x100000` | `0x080000` |
+| Factory | `0x180000` | `0x200000` |
+| fip | `0x380000` | `0x200000` |
+| ubi | `0x580000` | `0x4000000` |
 
-- It may take a long time to create a `.config` file and build the OpenWrt firmware. Thus, before create repository to build your own firmware, you may check out if others have already built it which meet your needs by simply [search `Actions-Openwrt` in GitHub](https://github.com/search?q=Actions-openwrt).
-- Add some meta info of your built firmware (such as firmware architecture and installed packages) to your repository introduction, this will save others' time.
+The SPI NAND definition enables MediaTek NMBM compatibility and keeps the original 64 MiB UBI region used by the stock-layout port. The build does **not** replace BL2, Factory calibration data or FIP.
 
-## Credits
+## Expected output
 
-- [Microsoft Azure](https://azure.microsoft.com)
-- [GitHub Actions](https://github.com/features/actions)
-- [OpenWrt](https://github.com/openwrt/openwrt)
-- [coolsnowwolf/lede](https://github.com/coolsnowwolf/lede)
-- [Mikubill/transfer](https://github.com/Mikubill/transfer)
-- [softprops/action-gh-release](https://github.com/softprops/action-gh-release)
-- [Mattraks/delete-workflow-runs](https://github.com/Mattraks/delete-workflow-runs)
-- [dev-drprasad/delete-older-releases](https://github.com/dev-drprasad/delete-older-releases)
-- [peter-evans/repository-dispatch](https://github.com/peter-evans/repository-dispatch)
+- `openwrt-...-ikuai_q3000-initramfs-kernel.bin` — temporary RAM boot/testing image
+- `openwrt-...-ikuai_q3000-squashfs-factory.bin` — complete UBI image for first installation with the stock layout
+- `openwrt-...-ikuai_q3000-squashfs-sysupgrade.bin` — upgrade image once OpenWrt is running
 
-## License
+The seed configuration enables SquashFS, initramfs, LuCI and Simplified Chinese LuCI translations.
 
-[MIT](https://github.com/P3TERX/Actions-OpenWrt/blob/main/LICENSE) © [**P3TERX**](https://p3terx.com)
+## Build
+
+Every relevant push to `main` starts the build, or it can be started manually from **Actions → Build iKuai Q3000 OpenWrt → Run workflow**.
+
+The workflow always clones the current `openwrt-25.12` stable branch before compiling and uploads the resulting Q3000 images as an Actions artifact.
+
+## Flashing caution
+
+Test `initramfs-kernel.bin` through U-Boot/TFTP first when possible and back up the original MTD partitions before persistent flashing. The file named `squashfs-factory.bin` is a firmware UBI image; it must never be written to the router's `Factory` calibration partition.
