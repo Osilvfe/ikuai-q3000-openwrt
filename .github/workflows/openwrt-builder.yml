@@ -71,7 +71,7 @@ jobs:
         run: |
           cp "$GITHUB_WORKSPACE/config.seed" .config
           make defconfig
-          grep -E '^CONFIG_TARGET_mediatek|^CONFIG_TARGET_ROOTFS_(SQUASHFS|INITRAMFS)|^CONFIG_PACKAGE_luci=' .config
+          grep -E '^CONFIG_TARGET_mediatek|^CONFIG_TARGET_ROOTFS_(SQUASHFS|INITRAMFS)|^CONFIG_PACKAGE_(luci|mwan3|luci-app-mwan3)=' .config
 
       - name: Download sources
         working-directory: openwrt

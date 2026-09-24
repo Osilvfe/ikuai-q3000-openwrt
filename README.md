@@ -29,7 +29,7 @@ The SPI NAND definition enables MediaTek NMBM compatibility and keeps the origin
 - `openwrt-...-ikuai_q3000-squashfs-factory.bin` — complete UBI image for first installation with the stock layout
 - `openwrt-...-ikuai_q3000-squashfs-sysupgrade.bin` — upgrade image once OpenWrt is running
 
-The seed configuration enables SquashFS, initramfs, LuCI and Simplified Chinese LuCI translations.
+The seed configuration enables SquashFS, initramfs, LuCI, Simplified Chinese LuCI translations, and mwan3 with its LuCI frontend. mwan3 is included as a package; WAN interfaces, members, policies and health checks still need to be configured after installation.
 
 ## Build
 
